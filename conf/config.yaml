@@ -1,0 +1,9 @@
+nodes:
+  node1: 192.168.0.2:4000
+  node2: 192.168.0.3:4000
+vaultIndex:
+  path: ./data
+logFile:
+  path: ./testlogfile
+plugin:
+  path: ./testplugin

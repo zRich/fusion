@@ -1,4 +1,4 @@
-package flogging
+package logging
 
 import (
 	"fmt"
@@ -27,25 +27,25 @@ type Logger interface {
 	Fatal(v ...any)
 }
 
-//config a logger
+// config a logger
 type Control interface {
 	SetLevel(Level)
 	SetOutput(io.Writer)
 }
 
-//combination of Logger, FormatLogger and Control
+// combination of Logger, FormatLogger and Control
 type FullLogger interface {
 	Logger
 	FormatLogger
 	Control
 }
 
-//level defines log message
-//when level is set,any log message with
-//a lower log level will not be output
+// level defines log message
+// when level is set,any log message with
+// a lower log level will not be output
 type Level int
 
-//the levels of logs
+// the levels of logs
 const (
 	LevelTrace Level = iota
 	LevelDebug

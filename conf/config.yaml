@@ -4,6 +4,6 @@ nodes:
 vaultIndex:
   path: ./data
 logFile:
-  path: ./testlogfile
+  path: ./logfile
 plugin:
-  path: ./testplugin
+  path: ./plugin

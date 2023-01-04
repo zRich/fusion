@@ -3,12 +3,15 @@ package vault
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 
 	"github.com/bytehubplus/fusion/did"
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/opt"
+	"github.com/syndtr/goleveldb/leveldb/util"
 )
 
 var (
@@ -16,6 +19,8 @@ var (
 	MetaPrefix []byte = []byte("VM")
 	// Vault data entry prefix
 	EntryPrefix []byte = []byte("VE")
+
+	SectionPrefix []byte = []byte("SEC")
 )
 
 // KvVault, Vault in KV database
@@ -23,6 +28,71 @@ type KvVault struct {
 	db   *leveldb.DB
 	Did  did.DID
 	lock sync.RWMutex
+}
+
+// CreateSecion creates a new section, return section ID, nil if seccuss otherwise return nil and an error
+// purpose the other part vault id or data factory id
+func (k *KvVault) CreateSecion(purpose []byte) ([]byte, error) {
+	if k.SectionExist(purpose) {
+		return nil, errors.New("section already exists")
+	} else {
+		section := fmt.Sprintf("%s%s", SectionPrefix, purpose)
+		k.Put(section, []byte("SECTION"))
+		return []byte(section), nil
+	}
+}
+
+func (v *KvVault) SectionExist(section []byte) bool {
+	exist, err := v.Get(string(fmt.Sprintf("%s%s", SectionPrefix, section)))
+	if err != nil && exist != nil {
+		return true
+	}
+	return false
+}
+
+// CleanSecion cleans data for section
+func (k *KvVault) CleanSecion(section []byte) error {
+	iter := k.db.NewIterator(util.BytesPrefix(section), nil)
+
+	for iter.Next() {
+		key := iter.Key()
+		k.db.Delete(key, nil)
+	}
+	iter.Release()
+
+	return nil
+}
+
+// locksection locks the section, which causes only controllers can access the section, others cannot
+func (k *KvVault) LockSection(section []byte) {
+	k.Put(fmt.Sprintf("%s%s", SectionPrefix, section), []byte("LOCK"))
+}
+
+// GrantRead allows vaultid read data from section
+func (k *KvVault) GrantRead(section []byte, vaultID []byte) error {
+	return k.Put(fmt.Sprintf("%s%s%s", SectionPrefix, section, vaultID), []byte("READ"))
+}
+
+func (k *KvVault) RevokeRead(section []byte, vaultid []byte) error {
+	return k.Put(fmt.Sprintf("%s%s%s", SectionPrefix, section, vaultid), []byte("NOREAD"))
+}
+
+// GrantWrite allows vaultID write data to section
+func (k *KvVault) GrantWrite(section []byte, vaultID []byte) error {
+	return k.Put(fmt.Sprintf("%s%s%s", SectionPrefix, section, vaultID), []byte("WRITE"))
+}
+
+func (k *KvVault) RevokeWrite(section []byte, vaultID []byte) error {
+	return k.Put(fmt.Sprintf("%s%s%s", SectionPrefix, section, vaultID), []byte("NOWRITE"))
+}
+
+// GrantUpdate grant vaultID update existing data in section
+func (k *KvVault) GrantUpdate(section []byte, vaultid []byte) error {
+	return k.Put(fmt.Sprintf("%s%s%s", SectionPrefix, section, vaultid), []byte("UPDATE"))
+}
+
+func (k *KvVault) RevokeUpdate(section []byte, vaultid []byte) error {
+	return k.Put(fmt.Sprintf("%s%s%s", SectionPrefix, section, vaultid), []byte("NOUPDATE"))
 }
 
 // Controllers returns vault's controller DIDs
@@ -33,7 +103,9 @@ func (k *KvVault) Controllers() []string {
 		return result
 	}
 
-	doc, err := did.ParseDocument(rawData)
+	var doc did.Document
+	json.Unmarshal(rawData, &doc)
+	// doc, err := did.ParseDocument(rawData)
 	for _, v := range doc.Controller {
 		result = append(result, v.String())
 	}
@@ -103,7 +175,8 @@ func (p *Provider) OpenWithDid(did did.DID) (Vault, error) {
 // param
 func (p *Provider) CreateVault(doc did.Document) (Vault, error) {
 	//create but not open existing
-	db, err := leveldb.OpenFile(fmt.Sprintf("%s/%s", p.RootFSPath, p.createVaultID(doc.ID)), &opt.Options{ErrorIfExist: true})
+	db, err := leveldb.OpenFile(fmt.Sprintf("%s/%s", p.RootFSPath,
+		p.createVaultID(did.DID(doc.ID))), &opt.Options{ErrorIfExist: true})
 	if err != nil {
 		return nil, err
 	}

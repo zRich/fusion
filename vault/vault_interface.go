@@ -19,9 +19,36 @@ type Vault interface {
 	PutEntry(entry []byte) ([]byte, error)
 }
 
+type VaultSection interface {
+	//CreateSecion creates a new section, return section ID, nil if seccuss otherwise return nil and an error
+	// purpose the other part vault id or data factory id
+	CreateSecion(purpose []byte) ([]byte, error)
+
+	//CleanSecion cleans data for section
+	CleanSecion(section []byte) error
+
+	//locksection locks the section, which causes only controllers can access the section, others cannot
+	LockSection(section []byte)
+	//GrantRead allows vaultid read data from section
+	GrantRead(section []byte, vaultID []byte) error
+	RevokeRead(section []byte, vaultid []byte) error
+
+	//GrantWrite allows vaultID write data to section
+	GrantWrite(section []byte, vaultID []byte) error
+	RevokeWrite(section []byte, vaultID []byte) error
+
+	//GrantUpdate grant vaultID update existing data in section
+	GrantUpdate(section []byte, vaultid []byte) error
+	RevokeUpdate(section []byte, vaultid []byte) error
+}
+
 type VaultProvider interface {
+	//CreateVault creates a new vault, the creator's signature of vault ID and controllers are required.
 	CreateVault(config Config) (Vault, error)
+	//Open opens an existing vault from filesystem
 	Open(id string) (Vault, error)
+
+	//obsolete, do not use
 	OpenWithDid(did did.DID) (Vault, error)
 }
 

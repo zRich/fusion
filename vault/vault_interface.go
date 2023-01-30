@@ -1,6 +1,10 @@
 package vault
 
-import "github.com/bytehubplus/fusion/did"
+import (
+	"context"
+
+	"github.com/bytehubplus/fusion/did"
+)
 
 // vault is a sensetive data storage unit which can store one or more data entry in KV format
 // did used as vault for being identification, authentication/authorization etc.
@@ -19,7 +23,16 @@ type Vault interface {
 	PutEntry(entry []byte) ([]byte, error)
 }
 
-type VaultSection interface {
+type Depositer interface {
+	DepositVerifiableCredential(ctx context.Context, vcJson []byte) (entryID string, err error)
+}
+
+type Withdrawer interface {
+	WithdrawVerifiableCredential(ctx context.Context, vcID string) error
+}
+
+// / A vault
+type Section interface {
 	//CreateSecion creates a new section, return section ID, nil if seccuss otherwise return nil and an error
 	// purpose the other part vault id or data factory id
 	CreateSecion(purpose []byte) ([]byte, error)

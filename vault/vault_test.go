@@ -26,7 +26,14 @@ func TestCreateVault(t *testing.T) {
 	// doc, _ := did.ParseDocument([]byte(validDoc))
 	var doc did.Document
 	json.Unmarshal([]byte(did1Json), &doc)
+	// json.Unmarshal([]byte(validDoc), &doc)
 	v, _ := p.CreateVault(doc)
 	didValue, _ := v.Get("did")
 	t.Logf("did value: %s", didValue)
+}
+
+func TestUnmashalJSON(t *testing.T) {
+	var doc did.Document
+	json.Unmarshal([]byte(did1Json), &doc)
+	t.Logf("did value: %s", doc.ID.ID)
 }

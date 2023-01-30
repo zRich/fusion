@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/bytehubplus/fusion/did"
+
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/opt"
 	"github.com/syndtr/goleveldb/leveldb/util"
@@ -25,9 +26,15 @@ var (
 
 // KvVault, Vault in KV database
 type KvVault struct {
-	db   *leveldb.DB
-	Did  did.DID
-	lock sync.RWMutex
+	db      *leveldb.DB
+	metaDoc did.DID
+	lock    sync.RWMutex
+}
+
+type vaultSection struct {
+	readDoc   did.Document
+	writeDoc  did.Document
+	updateDoc did.Document
 }
 
 // CreateSecion creates a new section, return section ID, nil if seccuss otherwise return nil and an error
@@ -143,7 +150,7 @@ func (k *KvVault) Delete(key string) error {
 }
 
 func (k *KvVault) VaultID() string {
-	hash := sha256.Sum256([]byte(k.Did.String()))
+	hash := sha256.Sum256([]byte(k.metaDoc.String()))
 	return string(hash[:])
 }
 
@@ -174,6 +181,12 @@ func (p *Provider) OpenWithDid(did did.DID) (Vault, error) {
 // CreateVault creates a new vault
 // param
 func (p *Provider) CreateVault(doc did.Document) (Vault, error) {
+
+	//public key must not be empty
+	if doc.IsAuthenticationEmpty() {
+		return nil, errors.New("authentication cannot be empty")
+	}
+
 	//create but not open existing
 	db, err := leveldb.OpenFile(fmt.Sprintf("%s/%s", p.RootFSPath,
 		p.createVaultID(did.DID(doc.ID))), &opt.Options{ErrorIfExist: true})
@@ -184,8 +197,9 @@ func (p *Provider) CreateVault(doc did.Document) (Vault, error) {
 	vault := KvVault{db: db}
 	didValue := doc.ID.String()
 	vault.Put("did", []byte(didValue))
-	raw, _ := doc.ID.MarshalJSON()
-	vault.Put("doc", raw)
+	raw, _ := doc.MarshalJSON()
+
+	vault.Put("metaDoc", raw)
 
 	return &vault, nil
 }

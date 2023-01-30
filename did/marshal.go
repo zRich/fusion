@@ -1,4 +1,4 @@
-package marshal
+package did
 
 import "encoding/json"
 

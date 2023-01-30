@@ -65,6 +65,11 @@ type Verifier interface {
 	Verify(k Key, signature, digest []byte) (bool, error)
 }
 
+// Recover public key from signature
+type Recoverer interface {
+	Recover(hash, signature []byte) ([]byte, error)
+}
+
 type Encrypter interface {
 	Encrypt(k Key, plaintext []byte) ([]byte, error)
 }

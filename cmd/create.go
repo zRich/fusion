@@ -11,8 +11,7 @@ import (
 	"log"
 	"os"
 
-	ssi "github.com/nuts-foundation/go-did"
-	"github.com/nuts-foundation/go-did/did"
+	"github.com/bytehubplus/fusion/did"
 	"github.com/spf13/cobra"
 )
 
@@ -58,12 +57,12 @@ func CreateDIDDoc(pubKey string, didFile string) error {
 
 	didID, _ := did.ParseDID("did:example:123")
 	doc := &did.Document{
-		Context: []ssi.URI{did.DIDContextV1URI()},
+		Context: []did.URI{did.DIDContextV1URI()},
 		ID:      *didID,
 	}
 
 	keyID, _ := did.ParseDIDURL("did:example:123#key-1")
-	vm, _ := did.NewVerificationMethod(*keyID, ssi.JsonWebKey2020, did.DID{}, pub)
+	vm, _ := did.NewVerificationMethod(*keyID, did.JsonWebKey2020, did.DID{}, pub)
 	doc.AddAssertionMethod(vm)
 	didJson, _ := json.MarshalIndent(doc, "", "  ")
 

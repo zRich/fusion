@@ -7,17 +7,12 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/nuts-foundation/go-did"
-
 	"github.com/lestrrat-go/jwx/jwk"
 	"github.com/shengdoushi/base58"
-
-	"github.com/nuts-foundation/go-did/internal/marshal"
 )
 
-// Document represents a DID Document as specified by the DID Core specification (https://www.w3.org/TR/did-core/).
 type Document struct {
-	Context              []ssi.URI                 `json:"@context"`
+	Context              []URI                     `json:"@context"`
 	ID                   DID                       `json:"id"`
 	Controller           []DID                     `json:"controller,omitempty"`
 	VerificationMethod   VerificationMethods       `json:"verificationMethod,omitempty"`
@@ -29,94 +24,15 @@ type Document struct {
 	Service              []Service                 `json:"service,omitempty"`
 }
 
-type VerificationMethods []*VerificationMethod
-
-// FindByID find the first VerificationMethod which matches the provided DID.
-// Returns nil when not found
-func (vms VerificationMethods) FindByID(id DID) *VerificationMethod {
-	for _, vm := range vms {
-		if vm.ID.Equals(id) {
-			return vm
-		}
-	}
-	return nil
-}
-
-// Remove removes a VerificationMethod from the slice.
-// If a verificationMethod was removed with the given DID, it will be returned
-func (vms *VerificationMethods) Remove(id DID) *VerificationMethod {
-	var (
-		filteredVMS []*VerificationMethod
-		foundVM     *VerificationMethod
-	)
-	for _, vm := range *vms {
-		if !vm.ID.Equals(id) {
-			filteredVMS = append(filteredVMS, vm)
-		} else {
-			foundVM = vm
-		}
-	}
-	*vms = filteredVMS
-	return foundVM
-}
-
-// Add adds a verificationMethod to the verificationMethods if it not already present.
-func (vms *VerificationMethods) Add(v *VerificationMethod) {
-	for _, ptr := range *vms {
-		// check if the pointer is already in the list
-		if ptr == v {
-			return
-		}
-		// check if the actual ids match?
-		if ptr.ID.Equals(v.ID) {
-			return
-		}
-	}
-	*vms = append(*vms, v)
-}
-
-type VerificationRelationships []VerificationRelationship
-
-// FindByID returns the first VerificationRelationship that matches with the id.
-// For comparison both the ID of the embedded VerificationMethod and reference is used.
-func (vmr VerificationRelationships) FindByID(id DID) *VerificationMethod {
-	for _, r := range vmr {
-		if r.VerificationMethod != nil {
-			if r.VerificationMethod.ID.Equals(id) {
-				return r.VerificationMethod
-			}
-		}
-	}
-	return nil
-}
-
-// Remove removes a VerificationRelationship from the slice.
-// If a VerificationRelationship was removed with the given DID, it will be returned
-func (vmr *VerificationRelationships) Remove(id DID) *VerificationRelationship {
-	var (
-		filteredVMRels []VerificationRelationship
-		removedRel     *VerificationRelationship
-	)
-	for _, r := range *vmr {
-		if !r.ID.Equals(id) {
-			filteredVMRels = append(filteredVMRels, r)
-		} else {
-			removedRel = &r
-		}
-	}
-	*vmr = filteredVMRels
-	return removedRel
-}
-
-// Add adds a verificationMethod to a relationship collection.
-// When the collection already contains the method it will not be added again.
-func (vmr *VerificationRelationships) Add(vm *VerificationMethod) {
-	for _, rel := range *vmr {
-		if rel.ID.Equals(vm.ID) {
-			return
-		}
-	}
-	*vmr = append(*vmr, VerificationRelationship{vm, vm.ID})
+// RemoveVerificationMethod from the document if present.
+// It'll also remove all references to the VerificationMethod
+func (d *Document) RemoveVerificationMethod(vmId DID) {
+	d.VerificationMethod.remove(vmId)
+	d.AssertionMethod.Remove(vmId)
+	d.Authentication.Remove(vmId)
+	d.CapabilityDelegation.Remove(vmId)
+	d.CapabilityInvocation.Remove(vmId)
+	d.KeyAgreement.Remove(vmId)
 }
 
 // AddAuthenticationMethod adds a VerificationMethod as AuthenticationMethod
@@ -175,13 +91,13 @@ func (d Document) MarshalJSON() ([]byte, error) {
 	if data, err := json.Marshal(tmp); err != nil {
 		return nil, err
 	} else {
-		return marshal.NormalizeDocument(data, marshal.Unplural(contextKey), marshal.Unplural(controllerKey))
+		return NormalizeDocument(data, Unplural(contextKey), Unplural(controllerKey))
 	}
 }
 
 func (d *Document) UnmarshalJSON(b []byte) error {
 	type Alias Document
-	normalizedDoc, err := marshal.NormalizeDocument(b, pluralContext, marshal.Plural(controllerKey))
+	normalizedDoc, err := NormalizeDocument(b, pluralContext, Plural(controllerKey))
 	if err != nil {
 		return err
 	}
@@ -224,13 +140,25 @@ func (d Document) IsController(controller DID) bool {
 	return false
 }
 
+func (d Document) IsControllerEmpty() bool {
+	return len(d.Controller) == 0
+}
+
+func (d Document) IsVerificationMethodEmpty() bool {
+	return len(d.VerificationMethod) == 0
+}
+
+func (d Document) IsAuthenticationEmpty() bool {
+	return len(d.Authentication) == 0
+}
+
 // ResolveEndpointURL finds the endpoint with the given type and unmarshalls it as single URL.
 // It returns the endpoint ID and URL, or an error if anything went wrong;
 // - holder document can't be resolved,
 // - service with given type doesn't exist,
 // - multiple services match,
 // - serviceEndpoint isn't a string.
-func (d *Document) ResolveEndpointURL(serviceType string) (endpointID ssi.URI, endpointURL string, err error) {
+func (d *Document) ResolveEndpointURL(serviceType string) (endpointID URI, endpointURL string, err error) {
 	var services []Service
 	for _, service := range d.Service {
 		if service.Type == serviceType {
@@ -238,105 +166,92 @@ func (d *Document) ResolveEndpointURL(serviceType string) (endpointID ssi.URI, e
 		}
 	}
 	if len(services) == 0 {
-		return ssi.URI{}, "", fmt.Errorf("service not found (did=%s, type=%s)", d.ID, serviceType)
+		return URI{}, "", fmt.Errorf("service not found (did=%s, type=%s)", d.ID, serviceType)
 	}
 	if len(services) > 1 {
-		return ssi.URI{}, "", fmt.Errorf("multiple services found (did=%s, type=%s)", d.ID, serviceType)
+		return URI{}, "", fmt.Errorf("multiple services found (did=%s, type=%s)", d.ID, serviceType)
 	}
 	err = services[0].UnmarshalServiceEndpoint(&endpointURL)
 	if err != nil {
-		return ssi.URI{}, "", fmt.Errorf("unable to unmarshal single URL from service (id=%s): %w", services[0].ID.String(), err)
+		return URI{}, "", fmt.Errorf("unable to unmarshal single URL from service (id=%s): %w", services[0].ID.String(), err)
 	}
 	return services[0].ID, endpointURL, nil
 }
 
-// Service represents a DID Service as specified by the DID Core specification (https://www.w3.org/TR/did-core/#service-endpoints).
-type Service struct {
-	ID              ssi.URI     `json:"id"`
-	Type            string      `json:"type,omitempty"`
-	ServiceEndpoint interface{} `json:"serviceEndpoint,omitempty"`
-}
+type VerificationMethods []*VerificationMethod
 
-func (s Service) MarshalJSON() ([]byte, error) {
-	type alias Service
-	tmp := alias(s)
-	if data, err := json.Marshal(tmp); err != nil {
-		return nil, err
-	} else {
-		return marshal.NormalizeDocument(data, marshal.Unplural(serviceEndpointKey))
-	}
-}
-
-func (s *Service) UnmarshalJSON(data []byte) error {
-	normalizedData, err := marshal.NormalizeDocument(data, pluralContext, marshal.PluralValueOrMap(serviceEndpointKey))
-	if err != nil {
-		return err
-	}
-	type alias Service
-	var result alias
-	if err := json.Unmarshal(normalizedData, &result); err != nil {
-		return err
-	}
-	*s = (Service)(result)
-	return nil
-}
-
-// Unmarshal unmarshalls the service endpoint into a domain-specific type.
-func (s Service) UnmarshalServiceEndpoint(target interface{}) error {
-	var valueToMarshal interface{}
-	if asSlice, ok := s.ServiceEndpoint.([]interface{}); ok && len(asSlice) == 1 {
-		valueToMarshal = asSlice[0]
-	} else {
-		valueToMarshal = s.ServiceEndpoint
-	}
-	if asJSON, err := json.Marshal(valueToMarshal); err != nil {
-		return err
-	} else {
-		return json.Unmarshal(asJSON, target)
-	}
-}
-
-// VerificationMethod represents a DID Verification Method as specified by the DID Core specification (https://www.w3.org/TR/did-core/#verification-methods).
 type VerificationMethod struct {
 	ID              DID                    `json:"id"`
-	Type            ssi.KeyType            `json:"type,omitempty"`
+	Type            KeyType                `json:"type,omitempty"`
 	Controller      DID                    `json:"controller,omitempty"`
 	PublicKeyBase58 string                 `json:"publicKeyBase58,omitempty"`
 	PublicKeyJwk    map[string]interface{} `json:"publicKeyJwk,omitempty"`
 }
 
-// NewVerificationMethod is a convenience method to easily create verificationMethods based on a set of given params.
-// It automatically encodes the provided public key based on the keyType.
-func NewVerificationMethod(id DID, keyType ssi.KeyType, controller DID, key crypto.PublicKey) (*VerificationMethod, error) {
+// FindByID find the first VerificationMethod which matches the provided DID.
+// Returns nil when not found
+func (vms VerificationMethods) FindByID(id DID) *VerificationMethod {
+	for _, vm := range vms {
+		if vm.ID.Equals(id) {
+			return vm
+		}
+	}
+	return nil
+}
+
+// remove a VerificationMethod from the slice.
+func (vms *VerificationMethods) remove(id DID) {
+	var filteredVMS []*VerificationMethod
+	for _, vm := range *vms {
+		if !vm.ID.Equals(id) {
+			filteredVMS = append(filteredVMS, vm)
+		}
+	}
+	*vms = filteredVMS
+}
+
+// Add adds a verificationMethod to the verificationMethods if it not already present.
+func (vms *VerificationMethods) Add(v *VerificationMethod) {
+	for _, ptr := range *vms {
+		// check if the pointer is already in the list
+		if ptr == v {
+			return
+		}
+		// check if the actual ids match?
+		if ptr.ID.Equals(v.ID) {
+			return
+		}
+	}
+	*vms = append(*vms, v)
+}
+
+func NewVerificationMethod(id DID, keyType KeyType, controller DID, key crypto.PublicKey) (*VerificationMethod, error) {
 	vm := &VerificationMethod{
 		ID:         id,
 		Type:       keyType,
 		Controller: controller,
 	}
 
-	if keyType == ssi.JsonWebKey2020 {
-		keyAsJWK, err := jwk.New(key)
+	if keyType == JsonWebKey2020 {
+		keyAsJwk, err := jwk.New(key)
 		if err != nil {
 			return nil, err
 		}
-		// Convert to JSON and back to fix encoding of key material to make sure
-		// an unmarshalled and newly created VerificationMethod are equal on object level.
-		// The format of PublicKeyJwk in verificationMethod is a map[string]interface{}.
-		// We can't use the Key.AsMap since the values of the map will all be internal jwk lib structs.
-		// After unmarshalling all the fields will be map[string]string.
-		keyAsJSON, err := json.Marshal(keyAsJWK)
-		if err != nil {
-			return nil, err
-		}
-		keyAsMap := map[string]interface{}{}
-		json.Unmarshal(keyAsJSON, &keyAsMap)
 
+		keyAsJson, err := json.Marshal(keyAsJwk)
+		if err != nil {
+			return nil, err
+		}
+
+		keyAsMap := map[string]interface{}{}
+		json.Unmarshal(keyAsJson, &keyAsMap)
 		vm.PublicKeyJwk = keyAsMap
 	}
-	if keyType == ssi.ED25519VerificationKey2018 {
+
+	if keyType == ED25519VerificationKey2018 {
 		ed25519Key, ok := key.(ed25519.PublicKey)
 		if !ok {
-			return nil, errors.New("wrong key type")
+			return nil, errors.New("unsupported key type")
 		}
 		encodedKey := base58.Encode(ed25519Key, base58.BitcoinAlphabet)
 		vm.PublicKeyBase58 = encodedKey
@@ -361,13 +276,13 @@ func (v VerificationMethod) JWK() (jwk.Key, error) {
 func (v VerificationMethod) PublicKey() (crypto.PublicKey, error) {
 	var pubKey crypto.PublicKey
 	switch v.Type {
-	case ssi.ED25519VerificationKey2018:
+	case ED25519VerificationKey2018:
 		keyBytes, err := base58.Decode(v.PublicKeyBase58, base58.BitcoinAlphabet)
 		if err != nil {
 			return nil, err
 		}
 		return ed25519.PublicKey(keyBytes), err
-	case ssi.JsonWebKey2020:
+	case JsonWebKey2020:
 		keyAsJWK, err := v.JWK()
 		if err != nil {
 			return nil, err
@@ -381,10 +296,53 @@ func (v VerificationMethod) PublicKey() (crypto.PublicKey, error) {
 	return nil, errors.New("unsupported verification method type")
 }
 
-// VerificationRelationship represents the usage of a VerificationMethod e.g. in authentication, assertionMethod, or keyAgreement.
+type VerificationRelationships []VerificationRelationship
+
 type VerificationRelationship struct {
 	*VerificationMethod
 	reference DID
+}
+
+// FindByID returns the first VerificationRelationship that matches with the id.
+// For comparison both the ID of the embedded VerificationMethod and reference is used.
+func (vmr VerificationRelationships) FindByID(id DID) *VerificationMethod {
+	for _, r := range vmr {
+		if r.VerificationMethod != nil {
+			if r.VerificationMethod.ID.Equals(id) {
+				return r.VerificationMethod
+			}
+		}
+	}
+	return nil
+}
+
+// Remove removes a VerificationRelationship from the slice.
+// If a VerificationRelationship was removed with the given DID, it will be returned
+func (vmr *VerificationRelationships) Remove(id DID) *VerificationRelationship {
+	var (
+		filteredVMRels []VerificationRelationship
+		removedRel     *VerificationRelationship
+	)
+	for _, r := range *vmr {
+		if !r.ID.Equals(id) {
+			filteredVMRels = append(filteredVMRels, r)
+		} else {
+			removedRel = &r
+		}
+	}
+	*vmr = filteredVMRels
+	return removedRel
+}
+
+// Add adds a verificationMethod to a relationship collection.
+// When the collection already contains the method it will not be added again.
+func (vmr *VerificationRelationships) Add(vm *VerificationMethod) {
+	for _, rel := range *vmr {
+		if rel.ID.Equals(vm.ID) {
+			return
+		}
+	}
+	*vmr = append(*vmr, VerificationRelationship{vm, vm.ID})
 }
 
 func (v VerificationRelationship) MarshalJSON() ([]byte, error) {
@@ -417,15 +375,49 @@ func (v *VerificationRelationship) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-func (v *VerificationMethod) UnmarshalJSON(bytes []byte) error {
-	type Alias VerificationMethod
-	tmp := Alias{}
-	err := json.Unmarshal(bytes, &tmp)
+type Service struct {
+	ID              URI         `json:"id"`
+	Type            string      `json:"type,omitempty"`
+	ServiceEndpoint interface{} `json:"serviceEndpoint,omitempty"`
+}
+
+func (s Service) MarshalJSON() ([]byte, error) {
+	type alias Service
+	tmp := alias(s)
+	if data, err := json.Marshal(tmp); err != nil {
+		return nil, err
+	} else {
+		return NormalizeDocument(data, Unplural(serviceEndpointKey))
+	}
+}
+
+func (s *Service) UnmarshalJSON(data []byte) error {
+	normalizedData, err := NormalizeDocument(data, pluralContext, PluralValueOrMap(serviceEndpointKey))
 	if err != nil {
 		return err
 	}
-	*v = (VerificationMethod)(tmp)
+	type alias Service
+	var result alias
+	if err := json.Unmarshal(normalizedData, &result); err != nil {
+		return err
+	}
+	*s = (Service)(result)
 	return nil
+}
+
+// Unmarshal unmarshalls the service endpoint into a domain-specific type.
+func (s Service) UnmarshalServiceEndpoint(target interface{}) error {
+	var valueToMarshal interface{}
+	if asSlice, ok := s.ServiceEndpoint.([]interface{}); ok && len(asSlice) == 1 {
+		valueToMarshal = asSlice[0]
+	} else {
+		valueToMarshal = s.ServiceEndpoint
+	}
+	if asJSON, err := json.Marshal(valueToMarshal); err != nil {
+		return err
+	} else {
+		return json.Unmarshal(asJSON, target)
+	}
 }
 
 func resolveVerificationRelationships(relationships []VerificationRelationship, methods []*VerificationMethod) error {

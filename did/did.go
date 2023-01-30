@@ -1,90 +1,40 @@
-// Package did is a set of tools to work with Decentralized Identifiers (DIDs) as described
-// in the DID spec https://w3c.github.io/did-core/
 package did
 
 import (
+	"encoding"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 )
 
-// Param represents a parsed DID param,
-// which contains a name and value. A generic param is defined
-// as a param name and value separated by a colon.
-// generic-param-name:param-value
-// A param may also be method specific, which
-// requires the method name to prefix the param name separated by a colon
-// method-name:param-name.
-// param = param-name [ "=" param-value ]
-// https://w3c.github.io/did-core/#generic-did-parameter-names
-// https://w3c.github.io/did-core/#method-specific-did-parameter-names
-type Param struct {
-	// param-name = 1*param-char
-	// Name may include a method name and param name separated by a colon
-	Name string
-	// param-value = *param-char
-	Value string
+var _ fmt.Stringer = DID{}
+var _ encoding.TextMarshaler = DID{}
+
+// DIDContextV1 contains the JSON-LD context for a DID Document
+const DIDContextV1 = "https://www.w3.org/ns/did/v1"
+
+// DIDContextV1URI returns DIDContextV1 as a URI
+func DIDContextV1URI() URI {
+	return MustParseURI(DIDContextV1)
 }
 
-// String encodes a Param struct into a valid Param string.
-// Name is required by the grammar. Value is optional
-func (p *Param) String() string {
-	if p.Name == "" {
-		return ""
-	}
-
-	if 0 < len(p.Value) {
-		return p.Name + "=" + p.Value
-	}
-
-	return p.Name
-}
-
-// A DID represents a parsed DID or a DID URL
 type DID struct {
-	// DID Method
-	// https://w3c.github.io/did-core/#method-specific-syntax
-	Method string
-
-	// The method-specific-id component of a DID
-	// method-specific-id = *idchar *( ":" *idchar )
-	ID string
-
-	// method-specific-id may be composed of multiple `:` separated idstrings
+	Method    string
+	ID        string
 	IDStrings []string
+	Params    []Param
 
-	// DID URL
-	// did-url = did *( ";" param ) path-abempty [ "?" query ] [ "#" fragment ]
-	// did-url may contain multiple params, a path, query, and fragment
-	Params []Param
-
-	// DID Path, the portion of a DID reference that follows the first forward slash character.
-	// https://w3c.github.io/did-core/#path
-	Path string
-
-	// Path may be composed of multiple `/` separated segments
-	// path-abempty  = *( "/" segment )
+	Path         string
 	PathSegments []string
-
-	// DID Query
-	// https://w3c.github.io/did-core/#query
-	// query = *( pchar / "/" / "?" )
-	Query string
-
-	// DID Fragment, the portion of a DID reference that follows the first hash sign character ("#")
-	// https://w3c.github.io/did-core/#fragment
-	Fragment string
+	Query        string
+	Fragment     string
 }
 
-// the parsers internal state
-type parser struct {
-	input        string // input to the parser
-	currentIndex int    // index in the input which the parser is currently processing
-	out          *DID   // the output DID that the parser will assemble as it steps through its state machine
-	err          error  // an error in the parser state machine
+// Empty checks whether the DID is set or not
+func (d DID) Empty() bool {
+	return d.Method == ""
 }
-
-// a step in the parser state machine that returns the next step
-type parserStep func() parserStep
 
 // IsURL returns true if a DID has a Path, a Query or a Fragment
 // https://w3c-ccg.github.io/did-spec/#dfn-did-reference
@@ -94,7 +44,7 @@ func (d *DID) IsURL() bool {
 
 // String encodes a DID struct into a valid DID string.
 // nolint: gocyclo
-func (d *DID) String() string {
+func (d DID) String() string {
 	var buf strings.Builder
 
 	// write the did: prefix
@@ -160,44 +110,96 @@ func (d *DID) String() string {
 	return buf.String()
 }
 
-// Parse parses the input string into a DID structure.
-func Parse(input string) (*DID, error) {
-	// intialize the parser state
-	p := &parser{input: input, out: &DID{}}
+// MarshalText implements encoding.TextMarshaler
+func (d DID) MarshalText() ([]byte, error) {
+	return []byte(d.String()), nil
+}
 
-	// the parser state machine is implemented as a loop over parser steps
-	// steps increment p.currentIndex as they consume the input, each step returns the next step to run
-	// the state machine halts when one of the steps returns nil
-	//
-	// This design is based on this talk from Rob Pike, although the talk focuses on lexical scanning,
-	// the DID grammar is simple enough for us to combine lexing and parsing into one lexerless parse
-	// http://www.youtube.com/watch?v=HxaD_trXwRE
-	parserState := p.checkLength
-	for parserState != nil {
-		parserState = parserState()
+// Equals checks whether the DID is exactly equal to another DID
+// The check is case sensitive.
+func (d DID) Equals(other DID) bool {
+	return d.String() == other.String()
+}
+
+// UnmarshalJSON unmarshals a DID encoded as JSON string, e.g.:
+// "did:nuts:c0dc584345da8a0e1e7a584aa4a36c30ebdb79d907aff96fe0e90ee972f58a17"
+func (d *DID) UnmarshalJSON(bytes []byte) error {
+	var didString string
+	err := json.Unmarshal(bytes, &didString)
+	if err != nil {
+		return ErrInvalidDID.wrap(err)
+	}
+	tmp, err := Parse(didString)
+	if err != nil {
+		return ErrInvalidDID.wrap(err)
+	}
+	*d = *tmp
+	return nil
+}
+
+// ParseDIDURL parses a DID URL.
+// https://www.w3.org/TR/did-core/#did-url-syntax
+// A DID URL is a URL that builds on the DID scheme.
+func ParseDIDURL(input string) (*DID, error) {
+	did, err := Parse(input)
+	if err != nil {
+		return nil, ErrInvalidDID.wrap(err)
 	}
 
-	// If one of the steps added an err to the parser state, exit. Return nil and the error.
-	err := p.err
+	return did, nil
+}
+
+// ParseDID parses a raw DID.
+// If the input contains a path, query or fragment, use the ParseDIDURL instead.
+// If it can't be parsed, an error is returned.
+func ParseDID(input string) (*DID, error) {
+	did, err := ParseDIDURL(input)
 	if err != nil {
 		return nil, err
 	}
+	if did.IsURL() {
+		return nil, ErrInvalidDID.wrap(errors.New("DID can not have path, fragment or query params"))
+	}
+	return did, nil
+}
 
-	// join IDStrings with : to make up ID
-	p.out.ID = strings.Join(p.out.IDStrings[:], ":")
+// must accepts a function like Parse and returns the value without error or panics otherwise.
+func must(fn func(string) (*DID, error), input string) DID {
+	v, err := fn(input)
+	if err != nil {
+		panic(err)
+	}
+	return *v
+}
 
-	// join PathSegments with / to make up Path
-	p.out.Path = strings.Join(p.out.PathSegments[:], "/")
+// MustParseDID is like ParseDID but panics if the string cannot be parsed.
+// It simplifies safe initialization of global variables holding compiled UUIDs.
+func MustParseDID(input string) DID {
+	return must(ParseDID, input)
+}
 
-	return p.out, nil
+// MustParseDIDURL is like ParseDIDURL but panics if the string cannot be parsed.
+// It simplifies safe initialization of global variables holding compiled UUIDs.
+func MustParseDIDURL(input string) DID {
+	return must(ParseDIDURL, input)
+}
+
+// the parsers internal state
+type parser struct {
+	input        string // input to the parser
+	currentIndex int    // index in the input which the parser is currently processing
+	out          *DID   // the output DID that the parser will assemble as it steps through its state machine
+	err          error  // an error in the parser state machine
 }
 
 // checkLength is a parserStep that checks if the input length is atleast 7
 // the grammar requires
-//   `did:` prefix (4 chars)
-//   + atleast one methodchar (1 char)
-//   + `:` (1 char)
-//   + atleast one idchar (1 char)
+//
+//	`did:` prefix (4 chars)
+//	+ atleast one methodchar (1 char)
+//	+ `:` (1 char)
+//	+ atleast one idchar (1 char)
+//
 // i.e atleast 7 chars
 // The current specification does not take a position on maximum length of a DID.
 // https://w3c-ccg.github.io/did-spec/#upper-limits-on-did-character-length
@@ -227,9 +229,10 @@ func (p *parser) parseScheme() parserStep {
 
 // parseMethod is a parserStep that extracts the DID Method
 // from the grammar:
-//   did        = "did:" method ":" specific-idstring
-//   method     = 1*methodchar
-//   methodchar = %x61-7A / DIGIT ; 61-7A is a-z in US-ASCII
+//
+//	did        = "did:" method ":" specific-idstring
+//	method     = 1*methodchar
+//	methodchar = %x61-7A / DIGIT ; 61-7A is a-z in US-ASCII
 func (p *parser) parseMethod() parserStep {
 	input := p.input
 	inputLength := len(input)
@@ -277,9 +280,11 @@ func (p *parser) parseMethod() parserStep {
 // parseID is a parserStep that extracts : separated idstrings that are part of a specific-idstring
 // and adds them to p.out.IDStrings
 // from the grammar:
-//   specific-idstring = idstring *( ":" idstring )
-//   idstring          = 1*idchar
-//   idchar            = ALPHA / DIGIT / "." / "-"
+//
+//	specific-idstring = idstring *( ":" idstring )
+//	idstring          = 1*idchar
+//	idchar            = ALPHA / DIGIT / "." / "-"
+//
 // p.out.IDStrings is later concatented by the Parse function before it returns.
 func (p *parser) parseID() parserStep {
 	input := p.input
@@ -357,9 +362,10 @@ func (p *parser) parseID() parserStep {
 // parseParamName is a parserStep that extracts a did-url param-name.
 // A Param struct is created for each param name that is encountered.
 // from the grammar:
-//   param              = param-name [ "=" param-value ]
-//   param-name         = 1*param-char
-//   param-char         = ALPHA / DIGIT / "." / "-" / "_" / ":" / pct-encoded
+//
+//	param              = param-name [ "=" param-value ]
+//	param-name         = 1*param-char
+//	param-char         = ALPHA / DIGIT / "." / "-" / "_" / ":" / pct-encoded
 func (p *parser) parseParamName() parserStep {
 	input := p.input
 	startIndex := p.currentIndex + 1
@@ -384,9 +390,10 @@ func (p *parser) parseParamName() parserStep {
 // parseParamValue is a parserStep that extracts a did-url param-value.
 // A parsed Param value requires that a Param was previously created when parsing a param-name.
 // from the grammar:
-//   param              = param-name [ "=" param-value ]
-//   param-value         = 1*param-char
-//   param-char         = ALPHA / DIGIT / "." / "-" / "_" / ":" / pct-encoded
+//
+//	param              = param-name [ "=" param-value ]
+//	param-value         = 1*param-char
+//	param-char         = ALPHA / DIGIT / "." / "-" / "_" / ":" / pct-encoded
 func (p *parser) parseParamValue() parserStep {
 	input := p.input
 	startIndex := p.currentIndex + 1
@@ -487,13 +494,15 @@ func (p *parser) paramTransition() parserStep {
 
 // parsePath is a parserStep that extracts a DID Path from a DID Reference
 // from the grammar:
-//   did-path      = segment-nz *( "/" segment )
-//   segment       = *pchar
-//   segment-nz    = 1*pchar
-//   pchar         = unreserved / pct-encoded / sub-delims / ":" / "@"
-//   unreserved    = ALPHA / DIGIT / "-" / "." / "_" / "~"
-//   pct-encoded   = "%" HEXDIG HEXDIG
-//   sub-delims    = "!" / "$" / "&" / "'" / "(" / ")" / "*" / "+" / "," / ";" / "="
+//
+//	did-path      = segment-nz *( "/" segment )
+//	segment       = *pchar
+//	segment-nz    = 1*pchar
+//	pchar         = unreserved / pct-encoded / sub-delims / ":" / "@"
+//	unreserved    = ALPHA / DIGIT / "-" / "." / "_" / "~"
+//	pct-encoded   = "%" HEXDIG HEXDIG
+//	sub-delims    = "!" / "$" / "&" / "'" / "(" / ")" / "*" / "+" / "," / ";" / "="
+//
 // nolint: gocyclo
 func (p *parser) parsePath() parserStep {
 	input := p.input
@@ -567,11 +576,12 @@ func (p *parser) parsePath() parserStep {
 
 // parseQuery is a parserStep that extracts a DID Query from a DID Reference
 // from the grammar:
-//   did-query     = *( pchar / "/" / "?" )
-//   pchar         = unreserved / pct-encoded / sub-delims / ":" / "@"
-//   unreserved    = ALPHA / DIGIT / "-" / "." / "_" / "~"
-//   pct-encoded   = "%" HEXDIG HEXDIG
-//   sub-delims    = "!" / "$" / "&" / "'" / "(" / ")" / "*" / "+" / "," / ";" / "="
+//
+//	did-query     = *( pchar / "/" / "?" )
+//	pchar         = unreserved / pct-encoded / sub-delims / ":" / "@"
+//	unreserved    = ALPHA / DIGIT / "-" / "." / "_" / "~"
+//	pct-encoded   = "%" HEXDIG HEXDIG
+//	sub-delims    = "!" / "$" / "&" / "'" / "(" / ")" / "*" / "+" / "," / ";" / "="
 func (p *parser) parseQuery() parserStep {
 	input := p.input
 	inputLength := len(input)
@@ -632,13 +642,16 @@ func (p *parser) parseQuery() parserStep {
 	return next
 }
 
+type parserStep func() parserStep
+
 // parseFragment is a parserStep that extracts a DID Fragment from a DID Reference
 // from the grammar:
-//   did-fragment  = *( pchar / "/" / "?" )
-//   pchar         = unreserved / pct-encoded / sub-delims / ":" / "@"
-//   unreserved    = ALPHA / DIGIT / "-" / "." / "_" / "~"
-//   pct-encoded   = "%" HEXDIG HEXDIG
-//   sub-delims    = "!" / "$" / "&" / "'" / "(" / ")" / "*" / "+" / "," / ";" / "="
+//
+//	did-fragment  = *( pchar / "/" / "?" )
+//	pchar         = unreserved / pct-encoded / sub-delims / ":" / "@"
+//	unreserved    = ALPHA / DIGIT / "-" / "." / "_" / "~"
+//	pct-encoded   = "%" HEXDIG HEXDIG
+//	sub-delims    = "!" / "$" / "&" / "'" / "(" / ")" / "*" / "+" / "," / ";" / "="
 func (p *parser) parseFragment() parserStep {
 	input := p.input
 	inputLength := len(input)
@@ -709,14 +722,16 @@ func (p *parser) errorf(index int, format string, args ...interface{}) parserSte
 
 // isNotValidIDChar returns true if a byte is not allowed in a ID
 // from the grammar:
-//   idchar = ALPHA / DIGIT / "." / "-"
+//
+//	idchar = ALPHA / DIGIT / "." / "-"
 func isNotValidIDChar(char byte) bool {
 	return isNotAlpha(char) && isNotDigit(char) && char != '.' && char != '-'
 }
 
 // isNotValidParamChar returns true if a byte is not allowed in a param-name
 // or param-value from the grammar:
-//   idchar = ALPHA / DIGIT / "." / "-" / "_" / ":"
+//
+//	idchar = ALPHA / DIGIT / "." / "-" / "_" / ":"
 func isNotValidParamChar(char byte) bool {
 	return isNotAlpha(char) && isNotDigit(char) &&
 		char != '.' && char != '-' && char != '_' && char != ':'
@@ -724,18 +739,22 @@ func isNotValidParamChar(char byte) bool {
 
 // isNotValidQueryOrFragmentChar returns true if a byte is not allowed in a Fragment
 // from the grammar:
-//   did-fragment = *( pchar / "/" / "?" )
-//   pchar        = unreserved / pct-encoded / sub-delims / ":" / "@"
+//
+//	did-fragment = *( pchar / "/" / "?" )
+//	pchar        = unreserved / pct-encoded / sub-delims / ":" / "@"
+//
 // pct-encoded is not checked in this function
 func isNotValidQueryOrFragmentChar(char byte) bool {
 	return isNotValidPathChar(char) && char != '/' && char != '?'
 }
 
 // isNotValidPathChar returns true if a byte is not allowed in Path
-//   did-path    = segment-nz *( "/" segment )
-//   segment     = *pchar
-//   segment-nz  = 1*pchar
-//   pchar       = unreserved / pct-encoded / sub-delims / ":" / "@"
+//
+//	did-path    = segment-nz *( "/" segment )
+//	segment     = *pchar
+//	segment-nz  = 1*pchar
+//	pchar       = unreserved / pct-encoded / sub-delims / ":" / "@"
+//
 // pct-encoded is not checked in this function
 func isNotValidPathChar(char byte) bool {
 	return isNotUnreservedOrSubdelim(char) && char != ':' && char != '@'
@@ -743,8 +762,10 @@ func isNotValidPathChar(char byte) bool {
 
 // isNotUnreservedOrSubdelim returns true if a byte is not unreserved or sub-delims
 // from the grammar:
-//   unreserved = ALPHA / DIGIT / "-" / "." / "_" / "~"
-//   sub-delims = "!" / "$" / "&" / "'" / "(" / ")" / "*" / "+" / "," / ";" / "="
+//
+//	unreserved = ALPHA / DIGIT / "-" / "." / "_" / "~"
+//	sub-delims = "!" / "$" / "&" / "'" / "(" / ")" / "*" / "+" / "," / ";" / "="
+//
 // https://tools.ietf.org/html/rfc3986#appendix-A
 func isNotUnreservedOrSubdelim(char byte) bool {
 	switch char {
@@ -795,4 +816,90 @@ func isNotBigLetter(char byte) bool {
 func isNotSmallLetter(char byte) bool {
 	// '\x61' is small letter a, '\x7A' small letter z
 	return (char < '\x61' || char > '\x7A')
+}
+
+// Parse parses the input string into a DID structure.
+func Parse(input string) (*DID, error) {
+	// intialize the parser state
+	p := &parser{input: input, out: &DID{}}
+
+	// the parser state machine is implemented as a loop over parser steps
+	// steps increment p.currentIndex as they consume the input, each step returns the next step to run
+	// the state machine halts when one of the steps returns nil
+	//
+	// This design is based on this talk from Rob Pike, although the talk focuses on lexical scanning,
+	// the DID grammar is simple enough for us to combine lexing and parsing into one lexerless parse
+	// http://www.youtube.com/watch?v=HxaD_trXwRE
+	parserState := p.checkLength
+	for parserState != nil {
+		parserState = parserState()
+	}
+
+	// If one of the steps added an err to the parser state, exit. Return nil and the error.
+	err := p.err
+	if err != nil {
+		return nil, err
+	}
+
+	// join IDStrings with : to make up ID
+	p.out.ID = strings.Join(p.out.IDStrings[:], ":")
+
+	// join PathSegments with / to make up Path
+	p.out.Path = strings.Join(p.out.PathSegments[:], "/")
+
+	return p.out, nil
+}
+
+// MarshalJSON marshals the DID to a JSON string
+func (d DID) MarshalJSON() ([]byte, error) {
+	didAsString := d.String()
+	return json.Marshal(didAsString)
+}
+
+type Param struct {
+	Name  string
+	Value string
+}
+
+// String encodes a Param struct into a valid Param string.
+// Name is required by the grammar. Value is optional
+func (p *Param) String() string {
+	if p.Name == "" {
+		return ""
+	}
+
+	if 0 < len(p.Value) {
+		return p.Name + "=" + p.Value
+	}
+
+	return p.Name
+}
+
+// ErrInvalidDID is returned when a parser function is supplied with a string that can't be parsed as DID.
+var ErrInvalidDID = ParserError{msg: "invalid DID"}
+
+// ParserError is used when returning DID-parsing related errors.
+type ParserError struct {
+	msg string
+	err error
+}
+
+func (w ParserError) wrap(err error) error {
+	return ParserError{msg: fmt.Sprintf("%s: %s", w.msg, err.Error()), err: err}
+}
+
+// Is checks whether the given error is a ParserError
+func (w ParserError) Is(other error) bool {
+	_, ok := other.(ParserError)
+	return ok
+}
+
+// Unwrap returns the underlying error.
+func (w ParserError) Unwrap() error {
+	return w.err
+}
+
+// Error returns the message of the error.
+func (w ParserError) Error() string {
+	return w.msg
 }

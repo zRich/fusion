@@ -1,4 +1,4 @@
-package ssi
+package did
 
 import (
 	"encoding"

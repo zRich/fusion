@@ -21,7 +21,7 @@ var (
 	// Vault data entry prefix
 	EntryPrefix []byte = []byte("VE")
 
-	SectionPrefix []byte = []byte("SEC")
+	PartitionPrefix []byte = []byte("SEC")
 )
 
 // KvVault, Vault in KV database
@@ -31,35 +31,50 @@ type KvVault struct {
 	lock    sync.RWMutex
 }
 
-type vaultSection struct {
+// Read reads key's value in Partition partiion
+func (k *KvVault) Read(Partition []byte, key []byte, signature []byte) ([]byte, error) {
+	panic("not implemented") // TODO: Implement
+}
+
+// Write write value for key in Partition partiion
+func (k *KvVault) Write(Partition []byte, key []byte, value []byte, signature []byte) error {
+	panic("not implemented") // TODO: Implement
+}
+
+// Update updates value for key in Partition partiion
+func (k *KvVault) Update(Partition []byte, key []byte, value []byte, signature []byte) error {
+	panic("not implemented") // TODO: Implement
+}
+
+type vaultPartition struct {
 	readDoc   did.Document
 	writeDoc  did.Document
 	updateDoc did.Document
 }
 
-// CreateSecion creates a new section, return section ID, nil if seccuss otherwise return nil and an error
+// CreatePartition creates a new partition, return partition ID, nil if seccuss otherwise return nil and an error
 // purpose the other part vault id or data factory id
-func (k *KvVault) CreateSecion(purpose []byte) ([]byte, error) {
-	if k.SectionExist(purpose) {
-		return nil, errors.New("section already exists")
+func (k *KvVault) CreatePartition(purpose []byte) ([]byte, error) {
+	if k.PartitionExist(purpose) {
+		return nil, errors.New("partition already exists")
 	} else {
-		section := fmt.Sprintf("%s%s", SectionPrefix, purpose)
-		k.Put(section, []byte("SECTION"))
-		return []byte(section), nil
+		partition := fmt.Sprintf("%s%s", PartitionPrefix, purpose)
+		k.Put(partition, []byte("PARTITION"))
+		return []byte(partition), nil
 	}
 }
 
-func (v *KvVault) SectionExist(section []byte) bool {
-	exist, err := v.Get(string(fmt.Sprintf("%s%s", SectionPrefix, section)))
+func (v *KvVault) PartitionExist(partition []byte) bool {
+	exist, err := v.Get(string(fmt.Sprintf("%s%s", PartitionPrefix, partition)))
 	if err != nil && exist != nil {
 		return true
 	}
 	return false
 }
 
-// CleanSecion cleans data for section
-func (k *KvVault) CleanSecion(section []byte) error {
-	iter := k.db.NewIterator(util.BytesPrefix(section), nil)
+// CleanPartition cleans data for partition
+func (k *KvVault) CleanPartition(partition []byte) error {
+	iter := k.db.NewIterator(util.BytesPrefix(partition), nil)
 
 	for iter.Next() {
 		key := iter.Key()
@@ -70,36 +85,36 @@ func (k *KvVault) CleanSecion(section []byte) error {
 	return nil
 }
 
-// locksection locks the section, which causes only controllers can access the section, others cannot
-func (k *KvVault) LockSection(section []byte) {
-	k.Put(fmt.Sprintf("%s%s", SectionPrefix, section), []byte("LOCK"))
+// lockpartition locks the partition, which causes only controllers can access the partition, others cannot
+func (k *KvVault) LockPartition(partition []byte) {
+	k.Put(fmt.Sprintf("%s%s", PartitionPrefix, partition), []byte("LOCK"))
 }
 
-// GrantRead allows vaultid read data from section
-func (k *KvVault) GrantRead(section []byte, vaultID []byte) error {
-	return k.Put(fmt.Sprintf("%s%s%s", SectionPrefix, section, vaultID), []byte("READ"))
+// GrantRead allows vaultid read data from partition
+func (k *KvVault) GrantRead(partition []byte, vaultID []byte) error {
+	return k.Put(fmt.Sprintf("%s%s%s", PartitionPrefix, partition, vaultID), []byte("READ"))
 }
 
-func (k *KvVault) RevokeRead(section []byte, vaultid []byte) error {
-	return k.Put(fmt.Sprintf("%s%s%s", SectionPrefix, section, vaultid), []byte("NOREAD"))
+func (k *KvVault) RevokeRead(partition []byte, vaultid []byte) error {
+	return k.Put(fmt.Sprintf("%s%s%s", PartitionPrefix, partition, vaultid), []byte("NOREAD"))
 }
 
-// GrantWrite allows vaultID write data to section
-func (k *KvVault) GrantWrite(section []byte, vaultID []byte) error {
-	return k.Put(fmt.Sprintf("%s%s%s", SectionPrefix, section, vaultID), []byte("WRITE"))
+// GrantWrite allows vaultID write data to partition
+func (k *KvVault) GrantWrite(partition []byte, vaultID []byte) error {
+	return k.Put(fmt.Sprintf("%s%s%s", PartitionPrefix, partition, vaultID), []byte("WRITE"))
 }
 
-func (k *KvVault) RevokeWrite(section []byte, vaultID []byte) error {
-	return k.Put(fmt.Sprintf("%s%s%s", SectionPrefix, section, vaultID), []byte("NOWRITE"))
+func (k *KvVault) RevokeWrite(partition []byte, vaultID []byte) error {
+	return k.Put(fmt.Sprintf("%s%s%s", PartitionPrefix, partition, vaultID), []byte("NOWRITE"))
 }
 
-// GrantUpdate grant vaultID update existing data in section
-func (k *KvVault) GrantUpdate(section []byte, vaultid []byte) error {
-	return k.Put(fmt.Sprintf("%s%s%s", SectionPrefix, section, vaultid), []byte("UPDATE"))
+// GrantUpdate grant vaultID update existing data in partition
+func (k *KvVault) GrantUpdate(partition []byte, vaultid []byte) error {
+	return k.Put(fmt.Sprintf("%s%s%s", PartitionPrefix, partition, vaultid), []byte("UPDATE"))
 }
 
-func (k *KvVault) RevokeUpdate(section []byte, vaultid []byte) error {
-	return k.Put(fmt.Sprintf("%s%s%s", SectionPrefix, section, vaultid), []byte("NOUPDATE"))
+func (k *KvVault) RevokeUpdate(partition []byte, vaultid []byte) error {
+	return k.Put(fmt.Sprintf("%s%s%s", PartitionPrefix, partition, vaultid), []byte("NOUPDATE"))
 }
 
 // Controllers returns vault's controller DIDs

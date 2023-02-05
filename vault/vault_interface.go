@@ -31,28 +31,38 @@ type Withdrawer interface {
 	WithdrawVerifiableCredential(ctx context.Context, vcID string) error
 }
 
-// / A vault
-type Section interface {
-	//CreateSecion creates a new section, return section ID, nil if seccuss otherwise return nil and an error
+// / A vault Partition interface
+type Partition interface {
+	// CreatePartition creates a new Partition, return Partition ID, nil if seccuss otherwise return nil and an error
 	// purpose the other part vault id or data factory id
-	CreateSecion(purpose []byte) ([]byte, error)
+	CreatePartition(purpose []byte, signature []byte) ([]byte, error)
 
-	//CleanSecion cleans data for section
-	CleanSecion(section []byte) error
+	// CleanPartition cleans data for Partition
+	CleanPartition(partition []byte, signature []byte) error
 
-	//locksection locks the section, which causes only controllers can access the section, others cannot
-	LockSection(section []byte)
-	//GrantRead allows vaultid read data from section
-	GrantRead(section []byte, vaultID []byte) error
-	RevokeRead(section []byte, vaultid []byte) error
+	// lockPartition locks the Partition, which causes only controllers can access the Partition, others cannot
+	LockPartition(partition []byte, signature []byte)
 
-	//GrantWrite allows vaultID write data to section
-	GrantWrite(section []byte, vaultID []byte) error
-	RevokeWrite(section []byte, vaultID []byte) error
+	// GrantRead allows vaultid read data from Partition
+	GrantRead(partition []byte, vaultID []byte, signature []byte) error
+	RevokeRead(partition []byte, vaultid []byte, signature []byte) error
 
-	//GrantUpdate grant vaultID update existing data in section
-	GrantUpdate(section []byte, vaultid []byte) error
-	RevokeUpdate(section []byte, vaultid []byte) error
+	// GrantWrite allows vaultID write data to Partition
+	GrantWrite(partition []byte, vaultID []byte, signature []byte) error
+	RevokeWrite(partition []byte, vaultID []byte, signature []byte) error
+
+	// GrantUpdate grant vaultID update existing data in Partition
+	GrantUpdate(partition []byte, vaultid []byte, signature []byte) error
+	RevokeUpdate(partition []byte, vaultid []byte, signature []byte) error
+
+	// Read reads key's value in Partition partiion
+	Read(partition []byte, key []byte, signature []byte) ([]byte, error)
+
+	// Write write value for key in Partition partiion
+	Write(partition []byte, key []byte, value []byte, signature []byte) error
+
+	// Update updates value for key in Partition partiion
+	Update(partition []byte, key []byte, value []byte, signature []byte) error
 }
 
 type VaultProvider interface {
